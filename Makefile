@@ -13,4 +13,4 @@ build_bin:
 	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 $(GOBUILD) -o $(BUILD_PATH)/$(APP_NAME) $(MAIN)
 
 clean_assets:
-	rm $(BUILD_PATH)
+	rm -rf $(BUILD_PATH)

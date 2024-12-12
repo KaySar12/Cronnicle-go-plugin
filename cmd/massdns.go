@@ -5,6 +5,7 @@ import (
 	"NextDomain-Utils/dto/response"
 	model "NextDomain-Utils/model"
 	"NextDomain-Utils/utils/cmd"
+	"NextDomain-Utils/utils/cronicle"
 	"NextDomain-Utils/utils/files"
 	"NextDomain-Utils/utils/massdns"
 	util "NextDomain-Utils/utils/massdns"
@@ -25,6 +26,8 @@ func init() {
 	massdnsCmd.AddCommand(massLookupCmdDEv)
 	massdnsCmd.AddCommand(checkZoneCmd)
 	massdnsCmd.AddCommand(checkZonesCmdDEv)
+	checkZoneCmd.PersistentFlags().String("status", "", "Zone Status")
+	checkZonesCmdDEv.PersistentFlags().String("status", "", "Zone Status")
 	massLookupCmd.PersistentFlags().String("type", "", "DNS Record type")
 	massLookupCmdDEv.PersistentFlags().String("type", "", "DNS Record type")
 }
@@ -61,6 +64,7 @@ var checkZoneCmd = &cobra.Command{
 	Use:   "check-zone",
 	Short: "Check Zone ",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		zoneStatus, _ := cmd.Flags().GetString("status")
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
 			line := scanner.Text()
@@ -70,9 +74,15 @@ var checkZoneCmd = &cobra.Command{
 			var job model.Job
 			err := json.Unmarshal([]byte(line), &job)
 			if err != nil {
-				continue
+				cronicle.Report(job, "Error", err)
+				return err
 			}
-			checkZones(job)
+			err = checkZones(job, zoneStatus)
+			if err != nil {
+				cronicle.Report(job, "Error", err)
+				return err
+			}
+			checkZones(job, zoneStatus)
 		}
 		return nil
 	},
@@ -106,22 +116,26 @@ var checkZonesCmdDEv = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to read lookupdata.json: %w", err)
 		}
+		zoneStatus, _ := cmd.Flags().GetString("status")
 		var job model.Job
 		err = json.Unmarshal([]byte(data), &job)
 		if err != nil {
-			return fmt.Errorf("failed to read lookupdata.json: %w", err)
+			cronicle.Report(job, "Error", err)
 		}
-		checkZones(job)
+		err = checkZones(job, zoneStatus)
+		if err != nil {
+			cronicle.Report(job, "Error", err)
+		}
 		return nil
 	},
 }
 
-func checkZones(job model.Job) error {
+func checkZones(job model.Job, zoneStatus string) error {
 	apikey := job.Params["apikey"].(string)
 	server := job.Params["server"].(string)
-
 	zones, err := powerdns.GetZonesPdnsAdmin(server, apikey)
 	if err != nil {
+		fmt.Println(err)
 		return err
 	}
 
@@ -141,40 +155,73 @@ func checkZones(job model.Job) error {
 
 	go func() {
 		defer wg.Done()
-		err := checkActiveZones(activeZones, job)
-		if err != nil {
-			// Handle the error (e.g., log it)
-			fmt.Println("Error in checkActiveZones:", err)
+		if strings.ToLower(zoneStatus) == "active" || zoneStatus == "" {
+			err = checkActiveZones(activeZones, job)
+			if err != nil {
+				fmt.Println("Error in checkActiveZones:", err)
+			}
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		err := checkDeactiveZones(deactiveZones, job)
-		if err != nil {
-			// Handle the error (e.g., log it)
-			fmt.Println("Error in checkDeactiveZones:", err)
+		if strings.ToLower(zoneStatus) == "deactive" || zoneStatus == "" {
+			err = checkDeactiveZones(deactiveZones, job)
+			if err != nil {
+				fmt.Println("Error in checkDeactiveZones:", err)
+			}
 		}
 	}()
-
 	wg.Wait()
+
 	return nil
+}
+func tableReport(queries []model.DNSQuery) model.Table {
+	var table = model.Table{
+		Title:  "MassDNS Stat",
+		Header: []string{"name", "type", "class", "status", "rx_ts", "data.answers", "flags", "resolver", "proto"},
+		Rows:   [][]interface{}{},
+	}
+
+	for _, query := range queries {
+		// Extract answers as a concatenated string
+		var answers []string
+		for _, answer := range query.Data.DataAnswers {
+			answers = append(answers, answer.Data)
+		}
+		answersStr := strings.Join(answers, "; ")
+
+		// Append the row to the table
+		row := []interface{}{
+			query.Name,
+			query.Type,
+			query.Class,
+			query.Status,
+			query.RxTs,
+			answersStr,
+			strings.Join(query.Flags, ", "),
+			query.Resolver,
+			query.Proto,
+		}
+		table.Rows = append(table.Rows, row)
+	}
+
+	return table
 }
 func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job model.Job) error {
 	fileOp := files.NewFileOp()
 	domains := "active-zone/domains.txt"
-	resolvers := "active-zone/resolvers.txt"
 	results := "active-zone/results.json"
+	resolvers := "active-zone/resolvers.txt"
 	fileOp.CreateDir("./active-zone", 0755)
 	fileOp.CreateFileWithMode(results, 0755)
 	fileOp.CreateFileWithMode(domains, 0755)
-
+	fileOp.DownloadFile("https://cdn.nextzenos.com/CDN/NextDomain/raw/branch/main/activezone-resolvers.txt", resolvers)
 	content := ""
 	for _, zone := range activeZones {
 		content += zone.Name + "\n"
 	}
 	fileOp.SaveFile(domains, content, 0755)
-	fileOp.DownloadFile("https://raw.githubusercontent.com/KaySar12/Cronicle-go-Plugins/refs/heads/main/resolvers.txt", resolvers)
 	var recordTypes = []string{"NS"}
 	err := massdns.BulkLookup(domains, resolvers, results, recordTypes)
 	if err != nil {
@@ -203,6 +250,7 @@ func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job mode
 			fmt.Println(res)
 		}
 	}
+	cronicle.Report(job, "Success", tableReport(queries))
 	// fileOp.DeleteFile(results)
 	// fileOp.DeleteFile(domains)
 	// fileOp.DeleteFile(resolvers)
@@ -212,13 +260,14 @@ func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job mode
 func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job model.Job) error {
 	fileOp := files.NewFileOp()
 	domains := "deactive-zone/domains.txt"
-	resolvers := "deactive-zone/resolvers.txt"
 	results := "deactive-zone/results.json"
+	resolvers := "deactive-zone/resolvers.txt"
 	fileOp.CreateDir("./deactive-zone", 0755)
 	layout := "2006-01-02T15:04:05"
 	fileOp.CreateFileWithMode(results, 0755)
 	fileOp.CreateFileWithMode(domains, 0755)
 	fileOp.WriteFile(domains, strings.NewReader("domains"), 0775)
+	fileOp.DownloadFile("https://git.nextzenos.com/CDN/NextDomain/raw/branch/main/deactivezone-resolvers.txt", resolvers)
 	now := time.Now()
 	for _, zone := range deactiveZones {
 		deactivate_age, err := time.Parse(layout, zone.UpdateTimeDeactive)
@@ -244,7 +293,6 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 		content += zone.Name + "\n"
 	}
 	fileOp.SaveFile(domains, content, 0755)
-	fileOp.DownloadFile("https://raw.githubusercontent.com/KaySar12/Cronicle-go-Plugins/refs/heads/main/resolvers.txt", resolvers)
 	var recordTypes = []string{"NS"}
 	err := massdns.BulkLookup(domains, resolvers, results, recordTypes)
 	if err != nil {
@@ -256,13 +304,13 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 		fmt.Print(err)
 		return err
 	}
-	activeZonesMap := make(map[string]response.GetZonesPdnsAdminResponse)
+	deactiveZonesMap := make(map[string]response.GetZonesPdnsAdminResponse)
 	for _, zone := range deactiveZones {
-		activeZonesMap[fmt.Sprintf("%s.", zone.Name)] = zone
+		deactiveZonesMap[fmt.Sprintf("%s.", zone.Name)] = zone
 	}
 
 	for _, query := range queries {
-		zone := activeZonesMap[query.Name]
+		zone := deactiveZonesMap[query.Name]
 
 		if checkValidQuery(query, job.Params["assign_zone"].(string), zone) {
 			res, err := powerdns.ChangeStatus(job.Params["server"].(string), job.Params["apikey"].(string), zone.Name, "Active")
@@ -273,6 +321,7 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 			fmt.Println(res)
 		}
 	}
+	cronicle.Report(job, "Success", tableReport(queries))
 	// fileOp.DeleteFile(results)
 	// fileOp.DeleteFile(domains)
 	// fileOp.DeleteFile(resolvers)
@@ -280,14 +329,14 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 	return nil
 }
 func checkValidQuery(query model.DNSQuery, assign_zone string, zone response.GetZonesPdnsAdminResponse) bool {
-	if len(query.DataAnswers) == 0 {
+	if len(query.Data.DataAnswers) == 0 {
 		return false
 	}
-	validNs1 := fmt.Sprintf("ns1.%s.%s", zone.Account.Name, assign_zone)
-	validNs2 := fmt.Sprintf("ns2.%s.%s", zone.Account.Name, assign_zone)
+	validNs1 := fmt.Sprintf("ns1.%s.%s.", zone.Account.Name, assign_zone)
+	validNs2 := fmt.Sprintf("ns2.%s.%s.", zone.Account.Name, assign_zone)
 	valid1 := false
 	valid2 := false
-	for _, answer := range query.DataAnswers {
+	for _, answer := range query.Data.DataAnswers {
 		if answer.Data == validNs1 {
 			valid1 = true
 		}

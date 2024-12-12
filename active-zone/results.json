@@ -1,0 +1,1 @@
+{"name":"myweb.net.","type":"NS","class":"IN","status":"NOERROR","rx_ts":1734002044151590634,"data":{"answers":[{"ttl":60,"type":"NS","class":"IN","name":"myweb.net.","data":"ns2.kaysar.nzvps.com."},{"ttl":60,"type":"NS","class":"IN","name":"myweb.net.","data":"ns1.kaysar.nzvps.com."}]},"flags":["aa","rd"],"resolver":"10.0.0.66:53","proto":"UDP"}
