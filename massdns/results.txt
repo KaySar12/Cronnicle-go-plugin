@@ -1,0 +1,53 @@
+;; Server: 8.8.8.8:53
+;; Size: 47
+;; Unix time: 1733820553
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1681
+;; flags: qr rd ra ; QUERY: 1, ANSWER: 1, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+nextzenos.com. IN A
+
+;; ANSWER SECTION:
+nextzenos.com. 3502 IN A 14.177.67.8
+
+
+;; Server: 8.8.8.8:53
+;; Size: 73
+;; Unix time: 1733820553
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 29281
+;; flags: qr rd ra ; QUERY: 1, ANSWER: 2, AUTHORITY: 0, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+nextzenos.com. IN NS
+
+;; ANSWER SECTION:
+nextzenos.com. 884 IN NS ns2.nzvps.com.
+nextzenos.com. 884 IN NS ns1.nzvps.com.
+
+
+;; Server: 8.8.8.8:53
+;; Size: 105
+;; Unix time: 1733820554
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 60243
+;; flags: qr rd ra ; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+random.local. IN NS
+
+;; AUTHORITY SECTION:
+. 82482 IN SOA a.root-servers.net. nstld.verisign-grs.com. 2024121000 1800 900 604800 86400
+
+
+;; Server: 8.8.8.8:53
+;; Size: 105
+;; Unix time: 1733820554
+;; ->>HEADER<<- opcode: QUERY, status: NXDOMAIN, id: 25920
+;; flags: qr rd ra ; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 0
+
+;; QUESTION SECTION:
+random.local. IN A
+
+;; AUTHORITY SECTION:
+. 86399 IN SOA a.root-servers.net. nstld.verisign-grs.com. 2024121000 1800 900 604800 86400
+
+
