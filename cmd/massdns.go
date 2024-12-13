@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	dir "NextDomain-Utils/constant"
 	"NextDomain-Utils/dto/request"
 	"NextDomain-Utils/dto/response"
 	model "NextDomain-Utils/model"
@@ -20,6 +21,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var zoneTypes []string
+
 func init() {
 	RootCmd.AddCommand(massdnsCmd)
 	massdnsCmd.AddCommand(massLookupCmd)
@@ -27,9 +30,12 @@ func init() {
 	massdnsCmd.AddCommand(checkZoneCmd)
 	massdnsCmd.AddCommand(checkZonesCmdDEv)
 	checkZoneCmd.PersistentFlags().String("status", "", "Zone Status")
+	checkZoneCmd.Flags().StringArrayVar(&zoneTypes, "type", []string{}, "")
 	checkZonesCmdDEv.PersistentFlags().String("status", "", "Zone Status")
+	checkZonesCmdDEv.Flags().StringArrayVar(&zoneTypes, "type", []string{}, "")
 	massLookupCmd.PersistentFlags().String("type", "", "DNS Record type")
 	massLookupCmdDEv.PersistentFlags().String("type", "", "DNS Record type")
+
 }
 
 var massdnsCmd = &cobra.Command{
@@ -60,33 +66,6 @@ var massLookupCmd = &cobra.Command{
 		return nil
 	},
 }
-var checkZoneCmd = &cobra.Command{
-	Use:   "check-zone",
-	Short: "Check Zone ",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		zoneStatus, _ := cmd.Flags().GetString("status")
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			var job model.Job
-			err := json.Unmarshal([]byte(line), &job)
-			if err != nil {
-				cronicle.Report(job, "Error", err)
-				return err
-			}
-			err = checkZones(job, zoneStatus)
-			if err != nil {
-				cronicle.Report(job, "Error", err)
-				return err
-			}
-			checkZones(job, zoneStatus)
-		}
-		return nil
-	},
-}
 var massLookupCmdDEv = &cobra.Command{
 	Use:   "lookup-dev",
 	Short: "Lookup DNS Record using massdns",
@@ -108,6 +87,40 @@ var massLookupCmdDEv = &cobra.Command{
 		return nil
 	},
 }
+var checkZoneCmd = &cobra.Command{
+	Use:   "check-zone",
+	Short: "Check Zone ",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		zoneStatus, err := cmd.Flags().GetString("status")
+		if err != nil {
+			panic(err)
+		}
+		zoneTypes, err := cmd.Flags().GetStringArray("type")
+		if err != nil {
+			panic(err)
+		}
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var job model.Job
+			err := json.Unmarshal([]byte(line), &job)
+			if err != nil {
+				cronicle.Report(job, "Error", err)
+				return err
+			}
+			err = checkZones(job, zoneStatus, zoneTypes)
+			if err != nil {
+				cronicle.Report(job, "Error", err)
+				return err
+			}
+		}
+		return nil
+	},
+}
+
 var checkZonesCmdDEv = &cobra.Command{
 	Use:   "check-zone-dev",
 	Short: "Lookup DNS Record using massdns",
@@ -116,13 +129,20 @@ var checkZonesCmdDEv = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to read lookupdata.json: %w", err)
 		}
-		zoneStatus, _ := cmd.Flags().GetString("status")
+		zoneStatus, err := cmd.Flags().GetString("status")
+		if err != nil {
+			panic(err)
+		}
+		zoneTypes, err := cmd.Flags().GetStringArray("type")
+		if err != nil {
+			panic(err)
+		}
 		var job model.Job
 		err = json.Unmarshal([]byte(data), &job)
 		if err != nil {
 			cronicle.Report(job, "Error", err)
 		}
-		err = checkZones(job, zoneStatus)
+		err = checkZones(job, zoneStatus, zoneTypes)
 		if err != nil {
 			cronicle.Report(job, "Error", err)
 		}
@@ -130,7 +150,7 @@ var checkZonesCmdDEv = &cobra.Command{
 	},
 }
 
-func checkZones(job model.Job, zoneStatus string) error {
+func checkZones(job model.Job, zoneStatus string, zoneTypes []string) error {
 	apikey := job.Params["apikey"].(string)
 	server := job.Params["server"].(string)
 	zones, err := powerdns.GetZonesPdnsAdmin(server, apikey)
@@ -156,7 +176,7 @@ func checkZones(job model.Job, zoneStatus string) error {
 	go func() {
 		defer wg.Done()
 		if strings.ToLower(zoneStatus) == "active" || zoneStatus == "" {
-			err = checkActiveZones(activeZones, job)
+			err = checkActiveZones(activeZones, job, zoneTypes)
 			if err != nil {
 				fmt.Println("Error in checkActiveZones:", err)
 			}
@@ -166,14 +186,45 @@ func checkZones(job model.Job, zoneStatus string) error {
 	go func() {
 		defer wg.Done()
 		if strings.ToLower(zoneStatus) == "deactive" || zoneStatus == "" {
-			err = checkDeactiveZones(deactiveZones, job)
+			err = checkDeactiveZones(deactiveZones, job, zoneTypes)
 			if err != nil {
 				fmt.Println("Error in checkDeactiveZones:", err)
 			}
 		}
 	}()
 	wg.Wait()
+	fileOp := files.NewFileOp()
+	month := time.Now().Month()
+	year := time.Now().Year()
+	today := string(time.Now().Format("2006-01-02"))
 
+	path := fmt.Sprintf("%s/%d/%s/%s", dir.Base_History, year, month.String(), today)
+	err = fileOp.CreateDir(path, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", path, err)
+	}
+	if strings.ToLower(zoneStatus) == "active" || zoneStatus == "" {
+		err = fileOp.CopyDir(dir.Base_Active_Dir, path)
+		if err != nil {
+			return fmt.Errorf("failed to copy directory %s to %s: %w", dir.Base_Active_Dir, path, err)
+		}
+		err = fileOp.Fs.RemoveAll(dir.Base_Active_Dir)
+		if err != nil {
+			return fmt.Errorf("failed to remove directory %s: %w", dir.Base_Active_Dir, err)
+		}
+
+	}
+	if strings.ToLower(zoneStatus) == "deactive" || zoneStatus == "" {
+		err = fileOp.CopyDir(dir.Base_Deactive_Dir, path)
+		if err != nil {
+			return fmt.Errorf("failed to copy directory %s to %s: %w", dir.Base_Deactive_Dir, path, err)
+		}
+
+		err = fileOp.Fs.RemoveAll(dir.Base_Deactive_Dir)
+		if err != nil {
+			return fmt.Errorf("failed to remove directory %s: %w", dir.Base_Deactive_Dir, err)
+		}
+	}
 	return nil
 }
 func tableReport(queries []model.DNSQuery) model.Table {
@@ -208,12 +259,13 @@ func tableReport(queries []model.DNSQuery) model.Table {
 
 	return table
 }
-func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job model.Job) error {
+func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job model.Job, zoneTypes []string) error {
 	fileOp := files.NewFileOp()
-	domains := "active-zone/domains.txt"
-	results := "active-zone/results.json"
-	resolvers := "active-zone/resolvers.txt"
-	fileOp.CreateDir("./active-zone", 0755)
+	domains := fmt.Sprintf("%sdomains.txt", dir.Base_Active_Dir)
+	results := fmt.Sprintf("%sresults.json", dir.Base_Active_Dir)
+	resolvers := fmt.Sprintf("%sresolvers.txt", dir.Base_Active_Dir)
+	logpath := fmt.Sprintf("%serrors.log", dir.Base_Active_Dir)
+	fileOp.CreateDir(dir.Base_Active_Dir, 0755)
 	fileOp.CreateFileWithMode(results, 0755)
 	fileOp.CreateFileWithMode(domains, 0755)
 	fileOp.DownloadFile("https://cdn.nextzenos.com/CDN/NextDomain/raw/branch/main/activezone-resolvers.txt", resolvers)
@@ -222,13 +274,12 @@ func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job mode
 		content += zone.Name + "\n"
 	}
 	fileOp.SaveFile(domains, content, 0755)
-	var recordTypes = []string{"NS"}
-	err := massdns.BulkLookup(domains, resolvers, results, recordTypes)
+	err := massdns.BulkLookup(domains, resolvers, results, zoneTypes, int(job.Params["processors"].(float64)), logpath)
 	if err != nil {
 		fmt.Print(err)
 		return err
 	}
-	queries, err := util.ParseDNSQueries(fileOp, results)
+	queries, err := util.ParseDNSQueries(fileOp, results, int(job.Params["processors"].(float64)))
 	if err != nil {
 		fmt.Print(err)
 		return err
@@ -250,19 +301,17 @@ func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job mode
 			fmt.Println(res)
 		}
 	}
+
 	cronicle.Report(job, "Success", tableReport(queries))
-	// fileOp.DeleteFile(results)
-	// fileOp.DeleteFile(domains)
-	// fileOp.DeleteFile(resolvers)
-	//fileOp.DeleteDir("active-zone")
 	return nil
 }
-func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job model.Job) error {
+func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job model.Job, zoneTypes []string) error {
 	fileOp := files.NewFileOp()
-	domains := "deactive-zone/domains.txt"
-	results := "deactive-zone/results.json"
-	resolvers := "deactive-zone/resolvers.txt"
-	fileOp.CreateDir("./deactive-zone", 0755)
+	domains := fmt.Sprintf("%sdomains.txt", dir.Base_Deactive_Dir)
+	results := fmt.Sprintf("%sresults.json", dir.Base_Deactive_Dir)
+	resolvers := fmt.Sprintf("%sresolvers.txt", dir.Base_Deactive_Dir)
+	logpath := fmt.Sprintf("%serrors.log", dir.Base_Deactive_Dir)
+	fileOp.CreateDir(dir.Base_Deactive_Dir, 0755)
 	layout := "2006-01-02T15:04:05"
 	fileOp.CreateFileWithMode(results, 0755)
 	fileOp.CreateFileWithMode(domains, 0755)
@@ -293,13 +342,12 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 		content += zone.Name + "\n"
 	}
 	fileOp.SaveFile(domains, content, 0755)
-	var recordTypes = []string{"NS"}
-	err := massdns.BulkLookup(domains, resolvers, results, recordTypes)
+	err := massdns.BulkLookup(domains, resolvers, results, zoneTypes, int(job.Params["processors"].(float64)), logpath)
 	if err != nil {
 		fmt.Print(err)
 		return err
 	}
-	queries, err := util.ParseDNSQueries(fileOp, results)
+	queries, err := util.ParseDNSQueries(fileOp, results, int(job.Params["processors"].(float64)))
 	if err != nil {
 		fmt.Print(err)
 		return err
@@ -322,10 +370,6 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 		}
 	}
 	cronicle.Report(job, "Success", tableReport(queries))
-	// fileOp.DeleteFile(results)
-	// fileOp.DeleteFile(domains)
-	// fileOp.DeleteFile(resolvers)
-	//fileOp.DeleteDir("deactive-zone")
 	return nil
 }
 func checkValidQuery(query model.DNSQuery, assign_zone string, zone response.GetZonesPdnsAdminResponse) bool {

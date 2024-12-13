@@ -15,7 +15,9 @@
                 "massdns",
                 "check-zone-dev",
                 "--status",
-                "deactive"
+                "deactive",
+                "--type",
+                "NS",
             ]
         }
     ]
