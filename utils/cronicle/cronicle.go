@@ -34,7 +34,7 @@ func Report(job model.Job, status string, args ...any) {
 	switch status {
 	case "Success":
 		response.HTML = model.HTMLReport{
-			Title:   "Report NextDomain lookup Result",
+			Title:   "Report MassDNS CheckZone Result",
 			Content: "",
 			Caption: "",
 		}
@@ -43,7 +43,7 @@ func Report(job model.Job, status string, args ...any) {
 		response.Complete = 1
 	case "Expire":
 		response.HTML = model.HTMLReport{
-			Title:   "Report NextDomain lookup Result",
+			Title:   "Report MassDNS CheckZone Result",
 			Content: fmt.Sprintf("<pre>%s is not valid domain managed by NextDomain</pre>", job.Params["zone"].(string)),
 			Caption: "",
 		}
@@ -52,7 +52,7 @@ func Report(job model.Job, status string, args ...any) {
 		response.Complete = 1
 	case "Error":
 		response.HTML = model.HTMLReport{
-			Title:   "Report NextDomain lookup Result",
+			Title:   "Report MassDNS CheckZone Result",
 			Content: fmt.Sprintf("<pre>Error Report:%s</pre>", err),
 			Caption: "",
 		}

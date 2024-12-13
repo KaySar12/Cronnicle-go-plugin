@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -274,12 +275,17 @@ func checkActiveZones(activeZones []response.GetZonesPdnsAdminResponse, job mode
 		content += zone.Name + "\n"
 	}
 	fileOp.SaveFile(domains, content, 0755)
-	err := massdns.BulkLookup(domains, resolvers, results, zoneTypes, int(job.Params["processors"].(float64)), logpath)
+	processors, err := strconv.Atoi(job.Params["processors"].(string))
 	if err != nil {
 		fmt.Print(err)
 		return err
 	}
-	queries, err := util.ParseDNSQueries(fileOp, results, int(job.Params["processors"].(float64)))
+	err = massdns.BulkLookup(domains, resolvers, results, zoneTypes, processors, logpath)
+	if err != nil {
+		fmt.Print(err)
+		return err
+	}
+	queries, err := util.ParseDNSQueries(fileOp, results, processors)
 	if err != nil {
 		fmt.Print(err)
 		return err
@@ -342,12 +348,17 @@ func checkDeactiveZones(deactiveZones []response.GetZonesPdnsAdminResponse, job 
 		content += zone.Name + "\n"
 	}
 	fileOp.SaveFile(domains, content, 0755)
-	err := massdns.BulkLookup(domains, resolvers, results, zoneTypes, int(job.Params["processors"].(float64)), logpath)
+	processors, err := strconv.Atoi(job.Params["processors"].(string))
 	if err != nil {
 		fmt.Print(err)
 		return err
 	}
-	queries, err := util.ParseDNSQueries(fileOp, results, int(job.Params["processors"].(float64)))
+	err = massdns.BulkLookup(domains, resolvers, results, zoneTypes, processors, logpath)
+	if err != nil {
+		fmt.Print(err)
+		return err
+	}
+	queries, err := util.ParseDNSQueries(fileOp, results, processors)
 	if err != nil {
 		fmt.Print(err)
 		return err
